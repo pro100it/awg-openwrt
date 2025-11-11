@@ -91,17 +91,14 @@ jobs:
       - name: Download and extract OpenWrt SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          echo "pkgarch: ${{ matrix.build_env.pkgarch}}, target:${{ matrix.build_env.target}}, subtarget: ${{ matrix.build_env.subtarget}}"
+          SDK_FILE=$(curl -s "https://downloads.openwrt.org/snapshots/targets/mediatek/filogic/" | grep -o 'href="openwrt-sdk[^"]*\.tar\.zst"' | sed 's/href="//' | sed 's/"//' | head -n1)
 
-          # Get the actual SDK filename from the directory listing
-          SDK_FILE=$(curl -s "https://downloads.openwrt.org/${{ matrix.build_env.tag }}/targets/${{ matrix.build_env.target}}/${{ matrix.build_env.subtarget}}/" | grep -o "openwrt-sdk-${{ matrix.build_env.tag }}-${{ matrix.build_env.target}}-${{ matrix.build_env.subtarget}}_gcc-[^\"]*_musl[^\"]*\.Linux-x86_64\.tar\.[xz|zst]*" | head -n1)
-          
-          if [ -z "$SDK_FILE" ]; then
-            echo "SDK file not found for ${{ matrix.build_env.tag }} ${{ matrix.build_env.target}} ${{ matrix.build_env.subtarget}}"
-            exit 1
-          fi
-          
-          SDK_DOWNLOAD_URL="https://downloads.openwrt.org/${{ matrix.build_env.tag }}/targets/${{ matrix.build_env.target}}/${{ matrix.build_env.subtarget}}/${SDK_FILE}"
+           if [ -z "$SDK_FILE" ]; then
+             echo "SDK file not found for snapshots mediatek filogic"
+           exit 1
+           fi
+
+          SDK_DOWNLOAD_URL="https://downloads.openwrt.org/snapshots/targets/mediatek/filogic/${SDK_FILE}"
           echo "Downloading SDK: $SDK_DOWNLOAD_URL"
           
           wget "$SDK_DOWNLOAD_URL"
