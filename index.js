@@ -15,7 +15,6 @@ if (!version) {
   process.exit(1);
 }
 
-// --- ИЗМЕНЕНИЕ ---
 // Определяем базовый URL в зависимости от версии
 let baseUrl;
 if (version === 'snapshots') {
@@ -28,7 +27,6 @@ if (version === 'snapshots') {
 
 // Этот URL теперь используется всеми функциями
 const targetsUrl = `${baseUrl}/targets/`;
-// --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
 
 async function fetchHTML(url) {
@@ -36,7 +34,6 @@ async function fetchHTML(url) {
     const { data } = await axios.get(url);
     return cheerio.load(data);
   } catch (error) {
-    // Добавляем более информативную ошибку, если страница не найдена
     if (error.response && error.response.status === 404) {
       console.error(`Error 404: Page not found at ${url}`);
       console.error(`Check if version "${version}" and target/subtarget paths are correct.`);
@@ -48,7 +45,6 @@ async function fetchHTML(url) {
 }
 
 async function getTargets() {
-  // Используем новую переменную
   const $ = await fetchHTML(targetsUrl);
   const targets = [];
   $('table tr td.n a').each((index, element) => {
@@ -61,7 +57,6 @@ async function getTargets() {
 }
 
 async function getSubtargets(target) {
-  // Используем новую переменную
   const $ = await fetchHTML(`${targetsUrl}${target}/`);
   const subtargets = [];
   $('table tr td.n a').each((index, element) => {
@@ -74,16 +69,11 @@ async function getSubtargets(target) {
 }
 
 async function getDetails(target, subtarget) {
-  // Используем новую переменную
   const packagesUrl = `${targetsUrl}${target}/${subtarget}/packages/`;
   const $ = await fetchHTML(packagesUrl);
   let vermagic = '';
   let pkgarch = '';
 
-  // Ваша Regex отлично работает и для релизов, и для снапшотов.
-  // snapshot: kernel_6.6.32-1-HASH_aarch64_cortex-a53.ipk
-  // release:  kernel_5.15.150-1-HASH-r1_mipsel_24kc.ipk
-  // Regex (?:-r\d+)? как раз обрабатывает опциональный "-r1" в релизах.
   $('a').each((index, element) => {
     const name = $(element).attr('href');
     if (name && name.startsWith('kernel_')) {
@@ -108,32 +98,21 @@ async function main() {
     const jobConfig = [];
 
     for (const target of targets) {
+      // ФИЛЬТР #1: (Правильный)
       // Пропускаем target, если указан массив фильтров и target не входит в него
       if (filterTargets.length > 0 && !filterTargets.includes(target)) {
         continue;
       }
 
       const subtargets = await getSubtargets(target);
-      if (subtargets.length === 0) {
-        // Это "плоский" target, где нет subtarget (например, "x86")
-        // Ваш скрипт его пропускал, но для "snapshots" x86/64 популярен.
-        // Давайте обработаем и его, используя subtarget="generic" (или сам target как subtarget)
-        // Обновление: Логика OpenWRT такова, что если subtarget нет, 
-        // то "packages" лежат прямо в .../targets/x86/64/
-        // Но ваша логика getDetails ищет .../targets/x86/64/packages/
-        // Давайте проверим, как работает ваша логика для x86/64
-        // .../targets/x86/64/packages/ - это 404.
-        // Пакеты лежат в .../targets/x86/64/
-        //
-        // Судя по вашей логике (которая ищет subtarget), вы не собираете для x86.
-        // Оставим эту логику без изменений.
-      }
-
       for (const subtarget of subtargets) {
+        // ФИЛЬТР #2: (Правильный)
         // Пропускаем subtarget, если указан массив фильтров и subtarget не входит в него
         if (filterSubtargets.length > 0 && !filterSubtargets.includes(subtarget)) {
           continue;
         }
+
+        // --- БЛОК С ОШИБКОЙ УДАЛЕН ---
 
         console.log(`Processing: ${target} / ${subtarget}`);
         const { vermagic, pkgarch } = await getDetails(target, subtarget);
