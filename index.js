@@ -15,7 +15,7 @@ if (!version) {
   process.exit(1);
 }
 
-const url = `https://downloads.openwrt.org/releases/${version}/targets/`;
+const url = `https://downloads.openwrt.org/${version}/targets/`;
 
 async function fetchHTML(url) {
   try {
