@@ -12,7 +12,7 @@ const filterSubtargets = filterSubtargetsStr ? filterSubtargetsStr.split(',').ma
 
 if (!version) {
   core.setFailed('Version argument is required');
-  process.exit(1);
+  process.exit(1); // <-- Правильно
 }
 
 // Определяем базовый URL в зависимости от версии
@@ -25,7 +25,6 @@ if (version === 'snapshots') {
   baseUrl = `https://downloads.openwrt.org/releases/${version}`;
 }
 
-// Этот URL теперь используется всеми функциями
 const targetsUrl = `${baseUrl}/targets/`;
 
 
@@ -40,7 +39,7 @@ async function fetchHTML(url) {
     } else {
       console.error(`Error fetching HTML for ${url}: ${error}`);
     }
-    throw error;
+    throw error; // <-- Правильно (ошибка будет поймана в main)
   }
 }
 
@@ -77,6 +76,8 @@ async function getDetails(target, subtarget) {
   $('a').each((index, element) => {
     const name = $(element).attr('href');
     if (name && name.startsWith('kernel_')) {
+      // Эта Regex работает как для снапшотов (kernel_6.6.32-1-HASH_...ipk)
+      // так и для релизов (kernel_5.15.150-1-HASH-r1_...ipk)
       const vermagicMatch = name.match(/kernel_\d+\.\d+\.\d+(?:-\d+)?[-~]([a-f0-9]+)(?:-r\d+)?_([a-zA-Z0-9_-]+)\.ipk$/);
       if (vermagicMatch) {
         vermagic = vermagicMatch[1];
@@ -86,6 +87,7 @@ async function getDetails(target, subtarget) {
   });
 
   if (!pkgarch) {
+    // Это не ошибка, просто информационное сообщение
     console.warn(`Could not find pkgarch for ${target}/${subtarget} at ${packagesUrl}`);
   }
 
@@ -98,51 +100,50 @@ async function main() {
     const jobConfig = [];
 
     for (const target of targets) {
-      // ФИЛЬТР #1: (Правильный)
-      // Пропускаем target, если указан массив фильтров и target не входит в него
       if (filterTargets.length > 0 && !filterTargets.includes(target)) {
         continue;
       }
 
       const subtargets = await getSubtargets(target);
       for (const subtarget of subtargets) {
-        // ФИЛЬТР #2: (Правильный)
-        // Пропускаем subtarget, если указан массив фильтров и subtarget не входит в него
         if (filterSubtargets.length > 0 && !filterSubtargets.includes(subtarget)) {
           continue;
         }
-
-        // --- БЛОК С ОШИБКОЙ УДАЛЕН ---
 
         console.log(`Processing: ${target} / ${subtarget}`);
         const { vermagic, pkgarch } = await getDetails(target, subtarget);
 
         if (pkgarch) { // Добавляем, только если нашли pkgarch
           jobConfig.push({
-            tag: version, // tag по-прежнему "snapshots" или "23.05.3"
+            tag: version,
             target,
             subtarget,
             vermagic,
             pkgarch,
           });
         } else {
+          // Если pkgarch не найден, мы просто пропускаем эту комбинацию
           console.warn(`Skipping ${target}/${subtarget} (pkgarch not found)`);
         }
       }
     }
 
     if (jobConfig.length === 0) {
+      // Это нормально, если фильтры не дали результатов, но мы выведем предупреждение
       console.warn('Warning: No build configurations were generated.');
       console.warn('This might be due to incorrect target/subtarget filters or no matching targets found.');
       console.warn(`Filters: Targets=[${filterTargets.join(',')}] Subtargets=[${filterSubtargets.join(',')}]`);
+      // Мы НЕ будем вызывать ошибку, просто вернем пустой массив
+      // Отладочный джоб в YML поймает "[]" и остановит воркфлоу.
     }
 
     core.setOutput('job-config', JSON.stringify(jobConfig));
     console.log('Successfully generated job configuration.');
-    console.log(JSON.stringify(jobConfig, null, 2));
+    console.log(JSON.stringify(jobConfig, null, 2)); // <-- Очень полезно для логов
 
   } catch (error) {
     core.setFailed(error.message);
+    process.exit(1); // <-- ГЛАВНОЕ ИСПРАВЛЕНИЕ
   }
 }
 
