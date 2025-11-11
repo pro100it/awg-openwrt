@@ -68,27 +68,57 @@ async function getSubtargets(target) {
 }
 
 async function getDetails(target, subtarget) {
+  // 1. Сначала проверяем папку /packages/ (типично для Snapshots)
   const packagesUrl = `${targetsUrl}${target}/${subtarget}/packages/`;
-  const $ = await fetchHTML(packagesUrl);
+  const subtargetRootUrl = `${targetsUrl}${target}/${subtarget}/`;
+
   let vermagic = '';
   let pkgarch = '';
+  let $;
 
-  $('a').each((index, element) => {
-    const name = $(element).attr('href');
-    if (name && name.startsWith('kernel_')) {
-      // Эта Regex работает как для снапшотов (kernel_6.6.32-1-HASH_...ipk)
-      // так и для релизов (kernel_5.15.150-1-HASH-r1_...ipk)
-      const vermagicMatch = name.match(/kernel_\d+\.\d+\.\d+(?:-\d+)?[-~]([a-f0-9]+)(?:-r\d+)?_([a-zA-Z0-9_-]+)\.ipk$/);
-      if (vermagicMatch) {
-        vermagic = vermagicMatch[1];
-        pkgarch = vermagicMatch[2];
+  try {
+    // Пытаемся получить HTML из папки packages/
+    $ = await fetchHTML(packagesUrl);
+    console.log(`Checking URL: ${packagesUrl}`);
+
+    // Если нашли, парсим его
+    $('a').each((index, element) => {
+      const name = $(element).attr('href');
+      if (name && name.startsWith('kernel_')) {
+        const vermagicMatch = name.match(/kernel_\d+\.\d+\.\d+(?:-\d+)?[-~]([a-f0-9]+)(?:-r\d+)?_([a-zA-Z0-9_-]+)\.ipk$/);
+        if (vermagicMatch) {
+          vermagic = vermagicMatch[1];
+          pkgarch = vermagicMatch[2];
+          console.log(`Found pkgarch: ${pkgarch} in /packages/ directory.`);
+        }
       }
-    }
-  });
+    });
+  } catch (e) {
+    // Если папка /packages/ не существует (404), это нормально.
+    // Мы перейдем ко второму шагу.
+    console.log(`Packages URL failed (may be 404), trying subtarget root: ${subtargetRootUrl}`);
+  }
+
+  // 2. Если pkgarch не найден, ищем в корне сабтаргета (типично для Releases)
+  if (!pkgarch) {
+    $ = await fetchHTML(subtargetRootUrl);
+    console.log(`Checking URL: ${subtargetRootUrl}`);
+
+    $('a').each((index, element) => {
+      const name = $(element).attr('href');
+      if (name && name.startsWith('kernel_')) {
+        const vermagicMatch = name.match(/kernel_\d+\.\d+\.\d+(?:-\d+)?[-~]([a-f0-9]+)(?:-r\d+)?_([a-zA-Z0-9_-]+)\.ipk$/);
+        if (vermagicMatch) {
+          vermagic = vermagicMatch[1];
+          pkgarch = vermagicMatch[2];
+          console.log(`Found pkgarch: ${pkgarch} in subtarget root directory.`);
+        }
+      }
+    });
+  }
 
   if (!pkgarch) {
-    // Это не ошибка, просто информационное сообщение
-    console.warn(`Could not find pkgarch for ${target}/${subtarget} at ${packagesUrl}`);
+    console.warn(`Could not find pkgarch (kernel_ file) for ${target}/${subtarget} after checking both locations.`);
   }
 
   return { vermagic, pkgarch };
