@@ -135,17 +135,6 @@ async function main() {
           continue;
         }
 
-        // Добавляем в конфигурацию только если:
-        // 1. Оба массива пустые (автоматическая сборка по тегу) - собираем всё
-        // 2. Оба массива НЕ пустые (ручной запуск) - target И subtarget должны быть в своих массивах
-        const isAutomatic = filterTargets.length === 0 && filterSubtargets.length === 0;
-        const isManualMatch = filterTargets.length > 0 && filterSubtargets.length > 0 &&
-          filterTargets.includes(target) && filterSubtargets.includes(subtarget);
-
-        if (!isAutomatic && !isManualMatch) {
-          continue;
-        }
-
         console.log(`Processing: ${target} / ${subtarget}`);
         const { vermagic, pkgarch } = await getDetails(target, subtarget);
 
