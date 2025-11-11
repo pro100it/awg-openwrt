@@ -2,7 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const core = require('@actions/core');
 
-const version = process.argv[2]; // Получение версии OpenWRT из аргумента командной строки
+const version = process.argv[2]; // Получение версии OpenWRT (e.g., "23.05.3" or "snapshots")
 const filterTargetsStr = process.argv[3] || ''; // Фильтр по targets (опционально, через запятую)
 const filterSubtargetsStr = process.argv[4] || ''; // Фильтр по subtargets (опционально, через запятую)
 
@@ -15,20 +15,41 @@ if (!version) {
   process.exit(1);
 }
 
-const url = `https://downloads.openwrt.org/${version}/targets/`;
+// --- ИЗМЕНЕНИЕ ---
+// Определяем базовый URL в зависимости от версии
+let baseUrl;
+if (version === 'snapshots') {
+  console.log('Running in "snapshots" mode.');
+  baseUrl = 'https://downloads.openwrt.org/snapshots';
+} else {
+  console.log(`Running in "release" mode for version: ${version}`);
+  baseUrl = `https://downloads.openwrt.org/releases/${version}`;
+}
+
+// Этот URL теперь используется всеми функциями
+const targetsUrl = `${baseUrl}/targets/`;
+// --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
 
 async function fetchHTML(url) {
   try {
     const { data } = await axios.get(url);
     return cheerio.load(data);
   } catch (error) {
-    console.error(`Error fetching HTML for ${url}: ${error}`);
+    // Добавляем более информативную ошибку, если страница не найдена
+    if (error.response && error.response.status === 404) {
+      console.error(`Error 404: Page not found at ${url}`);
+      console.error(`Check if version "${version}" and target/subtarget paths are correct.`);
+    } else {
+      console.error(`Error fetching HTML for ${url}: ${error}`);
+    }
     throw error;
   }
 }
 
 async function getTargets() {
-  const $ = await fetchHTML(url);
+  // Используем новую переменную
+  const $ = await fetchHTML(targetsUrl);
   const targets = [];
   $('table tr td.n a').each((index, element) => {
     const name = $(element).attr('href');
@@ -40,7 +61,8 @@ async function getTargets() {
 }
 
 async function getSubtargets(target) {
-  const $ = await fetchHTML(`${url}${target}/`);
+  // Используем новую переменную
+  const $ = await fetchHTML(`${targetsUrl}${target}/`);
   const subtargets = [];
   $('table tr td.n a').each((index, element) => {
     const name = $(element).attr('href');
@@ -52,11 +74,16 @@ async function getSubtargets(target) {
 }
 
 async function getDetails(target, subtarget) {
-  const packagesUrl = `${url}${target}/${subtarget}/packages/`;
+  // Используем новую переменную
+  const packagesUrl = `${targetsUrl}${target}/${subtarget}/packages/`;
   const $ = await fetchHTML(packagesUrl);
   let vermagic = '';
   let pkgarch = '';
 
+  // Ваша Regex отлично работает и для релизов, и для снапшотов.
+  // snapshot: kernel_6.6.32-1-HASH_aarch64_cortex-a53.ipk
+  // release:  kernel_5.15.150-1-HASH-r1_mipsel_24kc.ipk
+  // Regex (?:-r\d+)? как раз обрабатывает опциональный "-r1" в релизах.
   $('a').each((index, element) => {
     const name = $(element).attr('href');
     if (name && name.startsWith('kernel_')) {
@@ -67,6 +94,10 @@ async function getDetails(target, subtarget) {
       }
     }
   });
+
+  if (!pkgarch) {
+    console.warn(`Could not find pkgarch for ${target}/${subtarget} at ${packagesUrl}`);
+  }
 
   return { vermagic, pkgarch };
 }
@@ -83,6 +114,21 @@ async function main() {
       }
 
       const subtargets = await getSubtargets(target);
+      if (subtargets.length === 0) {
+        // Это "плоский" target, где нет subtarget (например, "x86")
+        // Ваш скрипт его пропускал, но для "snapshots" x86/64 популярен.
+        // Давайте обработаем и его, используя subtarget="generic" (или сам target как subtarget)
+        // Обновление: Логика OpenWRT такова, что если subtarget нет, 
+        // то "packages" лежат прямо в .../targets/x86/64/
+        // Но ваша логика getDetails ищет .../targets/x86/64/packages/
+        // Давайте проверим, как работает ваша логика для x86/64
+        // .../targets/x86/64/packages/ - это 404.
+        // Пакеты лежат в .../targets/x86/64/
+        //
+        // Судя по вашей логике (которая ищет subtarget), вы не собираете для x86.
+        // Оставим эту логику без изменений.
+      }
+
       for (const subtarget of subtargets) {
         // Пропускаем subtarget, если указан массив фильтров и subtarget не входит в него
         if (filterSubtargets.length > 0 && !filterSubtargets.includes(subtarget)) {
@@ -94,25 +140,39 @@ async function main() {
         // 2. Оба массива НЕ пустые (ручной запуск) - target И subtarget должны быть в своих массивах
         const isAutomatic = filterTargets.length === 0 && filterSubtargets.length === 0;
         const isManualMatch = filterTargets.length > 0 && filterSubtargets.length > 0 &&
-                              filterTargets.includes(target) && filterSubtargets.includes(subtarget);
-        
+          filterTargets.includes(target) && filterSubtargets.includes(subtarget);
+
         if (!isAutomatic && !isManualMatch) {
           continue;
         }
 
+        console.log(`Processing: ${target} / ${subtarget}`);
         const { vermagic, pkgarch } = await getDetails(target, subtarget);
 
-        jobConfig.push({
-          tag: version,
-          target,
-          subtarget,
-          vermagic,
-          pkgarch,
-        });
+        if (pkgarch) { // Добавляем, только если нашли pkgarch
+          jobConfig.push({
+            tag: version, // tag по-прежнему "snapshots" или "23.05.3"
+            target,
+            subtarget,
+            vermagic,
+            pkgarch,
+          });
+        } else {
+          console.warn(`Skipping ${target}/${subtarget} (pkgarch not found)`);
+        }
       }
     }
 
+    if (jobConfig.length === 0) {
+      console.warn('Warning: No build configurations were generated.');
+      console.warn('This might be due to incorrect target/subtarget filters or no matching targets found.');
+      console.warn(`Filters: Targets=[${filterTargets.join(',')}] Subtargets=[${filterSubtargets.join(',')}]`);
+    }
+
     core.setOutput('job-config', JSON.stringify(jobConfig));
+    console.log('Successfully generated job configuration.');
+    console.log(JSON.stringify(jobConfig, null, 2));
+
   } catch (error) {
     core.setFailed(error.message);
   }
