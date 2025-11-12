@@ -127,15 +127,24 @@ dnsmasqfull() {
 }
 
 dnsmasqconfdir() {
-    VERSION_ID=$(cat /etc/os-release | grep VERSION_ID | cut -d '"' -f 2 | cut -d '.' -f 1)
-    if [ "$VERSION_ID" -ge 24 ]; then
-        if uci get dhcp.@dnsmasq[0].confdir | grep -q /tmp/dnsmasq.d; then
-            printf "\033[32;1mconfdir already set\033[0m\n"
+    # Проверяем версию OpenWrt
+    if [ -f /etc/os-release ]; then
+        source /etc/os-release
+        # Для SNAPSHOT или версий 24+ настраиваем confdir
+        if [ "$VERSION_ID" = "snapshot" ] || [ "$VERSION_ID" -ge 24 ] 2>/dev/null; then
+            if uci get dhcp.@dnsmasq[0].confdir 2>/dev/null | grep -q /tmp/dnsmasq.d; then
+                printf "\033[32;1mconfdir already set\033[0m\n"
+            else
+                printf "\033[32;1mSetting confdir for $PRETTY_NAME\033[0m\n"
+                uci set dhcp.@dnsmasq[0].confdir='/tmp/dnsmasq.d'
+                uci commit dhcp
+                printf "\033[32;1mconfdir configured successfully\033[0m\n"
+            fi
         else
-            printf "\033[32;1mSetting confdir\033[0m\n"
-            uci set dhcp.@dnsmasq[0].confdir='/tmp/dnsmasq.d'
-            uci commit dhcp
+            printf "\033[32;1mSkipping confdir setup for version $VERSION_ID\033[0m\n"
         fi
+    else
+        printf "\033[33;1mCannot determine OpenWrt version, skipping confdir setup\033[0m\n"
     fi
 }
 
