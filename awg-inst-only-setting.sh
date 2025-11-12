@@ -117,6 +117,28 @@ add_tunnel() {
     fi
 }
 
+dnsmasqfull() {
+    if apk info | grep -q dnsmasq-full; then
+        printf "\033[32;1mdnsmasq-full already installed\033[0m\n"
+    else
+        printf "\033[32;1mInstalling dnsmasq-full\033[0m\n"
+        apk add dnsmasq-full
+    fi
+}
+
+dnsmasqconfdir() {
+    VERSION_ID=$(cat /etc/os-release | grep VERSION_ID | cut -d '"' -f 2 | cut -d '.' -f 1)
+    if [ "$VERSION_ID" -ge 24 ]; then
+        if uci get dhcp.@dnsmasq[0].confdir | grep -q /tmp/dnsmasq.d; then
+            printf "\033[32;1mconfdir already set\033[0m\n"
+        else
+            printf "\033[32;1mSetting confdir\033[0m\n"
+            uci set dhcp.@dnsmasq[0].confdir='/tmp/dnsmasq.d'
+            uci commit dhcp
+        fi
+    fi
+}
+
 add_zone() {
     if  [ "$TUNNEL" == 0 ]; then
         printf "\033[32;1mZone setting skipped\033[0m\n"
@@ -345,6 +367,8 @@ check_repo
 add_packages
 add_tunnel
 add_mark
+dnsmasqfull
+dnsmasqconfdir
 add_zone
 add_set
 add_dns_resolver
