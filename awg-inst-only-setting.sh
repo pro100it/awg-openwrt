@@ -232,7 +232,7 @@ add_packages() {
 }
 
 add_getdomains() {
-    echo "Choose your country"
+    echo "Choose you country"
     echo "Select:"
     echo "1) Russia inside. You are inside Russia"
     echo "2) Russia outside. You are outside of Russia, but you need access to Russian resources"
@@ -242,23 +242,28 @@ add_getdomains() {
     while true; do
     read -r -p '' COUNTRY
         case $COUNTRY in 
+
         1) 
             COUNTRY=russia_inside
             break
             ;;
+
         2)
             COUNTRY=russia_outside
             break
             ;;
+
         3) 
             COUNTRY=ukraine
             break
             ;;
+
         4) 
-            echo "Skipped"
+            echo "Skiped"
             COUNTRY=0
             break
             ;;
+
         *)
             echo "Choose from the following options"
             ;;
@@ -266,11 +271,11 @@ add_getdomains() {
     done
 
     if [ "$COUNTRY" == 'russia_inside' ]; then
-        DOMAINS_URL="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-dnsmasq-nfset.lst"
+        EOF_DOMAINS=DOMAINS=https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-dnsmasq-nfset.lst
     elif [ "$COUNTRY" == 'russia_outside' ]; then
-        DOMAINS_URL="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/outside-dnsmasq-nfset.lst"
+        EOF_DOMAINS=DOMAINS=https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/outside-dnsmasq-nfset.lst
     elif [ "$COUNTRY" == 'ukraine' ]; then
-        DOMAINS_URL="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Ukraine/inside-dnsmasq-nfset.lst"
+        EOF_DOMAINS=DOMAINS=https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Ukraine/inside-dnsmasq-nfset.lst
     fi
 
     if [ "$COUNTRY" != '0' ]; then
@@ -284,42 +289,41 @@ cat << EOF > /etc/init.d/getdomains
 
 START=99
 
-start() {
+start () {
+    $EOF_DOMAINS
+EOF
+cat << 'EOF' >> /etc/init.d/getdomains
     count=0
-    while [ \$count -lt 3 ]; do
-        if curl -m 10 -s https://raw.githubusercontent.com > /dev/null; then
-            if curl -f -s "$DOMAINS_URL" -o /tmp/dnsmasq.d/domains.lst; then
-                if dnsmasq --conf-file=/tmp/dnsmasq.d/domains.lst --test 2>&1 | grep -q "syntax check OK"; then
-                    /etc/init.d/dnsmasq restart
-                    echo "Domains list updated successfully"
-                    break
-                else
-                    echo "Downloaded file has syntax errors"
-                fi
-            else
-                echo "Failed to download domains list"
-            fi
+    while true; do
+        if curl -m 3 github.com; then
+            curl -f $DOMAINS --output /tmp/dnsmasq.d/domains.lst
+            break
         else
-            echo "GitHub is not available. Check internet connection [\$count]"
-            count=\$((count+1))
-            sleep 5
+            echo "GitHub is not available. Check the internet availability [$count]"
+            count=$((count+1))
         fi
     done
-}
 
-stop() {
-    return 0
+    if dnsmasq --conf-file=/tmp/dnsmasq.d/domains.lst --test 2>&1 | grep -q "syntax check OK"; then
+        /etc/init.d/dnsmasq restart
+    fi
 }
 EOF
 
         chmod +x /etc/init.d/getdomains
         /etc/init.d/getdomains enable
 
-        # Исправляем добавление в crontab
-        printf "\033[32;1mAdding cron job...\033[0m\n"
-        (crontab -l 2>/dev/null || true; echo "0 */8 * * * /etc/init.d/getdomains start") | crontab -
+        if crontab -l | grep -q /etc/init.d/getdomains; then
+            printf "\033[32;1mCrontab already configured\033[0m\n"
+
+        else
+            crontab -l | { cat; echo "0 */8 * * * /etc/init.d/getdomains start"; } | crontab -
+            printf "\033[32;1mIgnore this error. This is normal for a new installation\033[0m\n"
+            /etc/init.d/cron restart
+        fi
 
         printf "\033[32;1mStart script\033[0m\n"
+
         /etc/init.d/getdomains start
     fi
 }
