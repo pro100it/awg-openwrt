@@ -266,52 +266,58 @@ add_getdomains() {
     done
 
     if [ "$COUNTRY" == 'russia_inside' ]; then
-        EOF_DOMAINS=DOMAINS=https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-dnsmasq-nfset.lst
+        DOMAINS_URL="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-dnsmasq-nfset.lst"
     elif [ "$COUNTRY" == 'russia_outside' ]; then
-        EOF_DOMAINS=DOMAINS=https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/outside-dnsmasq-nfset.lst
+        DOMAINS_URL="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/outside-dnsmasq-nfset.lst"
     elif [ "$COUNTRY" == 'ukraine' ]; then
-        EOF_DOMAINS=DOMAINS=https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Ukraine/inside-dnsmasq-nfset.lst
+        DOMAINS_URL="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Ukraine/inside-dnsmasq-nfset.lst"
     fi
 
     if [ "$COUNTRY" != '0' ]; then
         printf "\033[32;1mCreate script /etc/init.d/getdomains\033[0m\n"
+
+        # Создаем директорию если не существует
+        mkdir -p /tmp/dnsmasq.d
 
 cat << EOF > /etc/init.d/getdomains
 #!/bin/sh /etc/rc.common
 
 START=99
 
-start () {
-    $EOF_DOMAINS
-EOF
-cat << 'EOF' >> /etc/init.d/getdomains
+start() {
     count=0
-    while true; do
-        if curl -m 3 github.com; then
-            curl -f $DOMAINS --output /tmp/dnsmasq.d/domains.lst
-            break
+    while [ \$count -lt 3 ]; do
+        if curl -m 10 -s https://raw.githubusercontent.com > /dev/null; then
+            if curl -f -s "$DOMAINS_URL" -o /tmp/dnsmasq.d/domains.lst; then
+                if dnsmasq --conf-file=/tmp/dnsmasq.d/domains.lst --test 2>&1 | grep -q "syntax check OK"; then
+                    /etc/init.d/dnsmasq restart
+                    echo "Domains list updated successfully"
+                    break
+                else
+                    echo "Downloaded file has syntax errors"
+                fi
+            else
+                echo "Failed to download domains list"
+            fi
         else
-            echo "GitHub is not available. Check the internet availability [$count]"
-            count=$((count+1))
+            echo "GitHub is not available. Check internet connection [\$count]"
+            count=\$((count+1))
+            sleep 5
         fi
     done
+}
 
-    if dnsmasq --conf-file=/tmp/dnsmasq.d/domains.lst --test 2>&1 | grep -q "syntax check OK"; then
-        /etc/init.d/dnsmasq restart
-    fi
+stop() {
+    return 0
 }
 EOF
 
         chmod +x /etc/init.d/getdomains
         /etc/init.d/getdomains enable
 
-        if crontab -l | grep -q /etc/init.d/getdomains; then
-            printf "\033[32;1mCrontab already configured\033[0m\n"
-        else
-            crontab -l | { cat; echo "0 */8 * * * /etc/init.d/getdomains start"; } | crontab -
-            printf "\033[32;1mIgnore this error. This is normal for a new installation\033[0m\n"
-            /etc/init.d/cron restart
-        fi
+        # Исправляем добавление в crontab
+        printf "\033[32;1mAdding cron job...\033[0m\n"
+        (crontab -l 2>/dev/null || true; echo "0 */8 * * * /etc/init.d/getdomains start") | crontab -
 
         printf "\033[32;1mStart script\033[0m\n"
         /etc/init.d/getdomains start
@@ -319,10 +325,15 @@ EOF
 }
 
 # System Details
-MODEL=$(cat /tmp/sysinfo/model)
-source /etc/os-release
-printf "\033[34;1mModel: $MODEL\033[0m\n"
-printf "\033[34;1mVersion: $OPENWRT_RELEASE\033[0m\n"
+MODEL=$(cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown")
+if [ -f /etc/os-release ]; then
+    source /etc/os-release
+    printf "\033[34;1mModel: $MODEL\033[0m\n"
+    printf "\033[34;1mVersion: ${OPENWRT_RELEASE:-Unknown}\033[0m\n"
+else
+    printf "\033[34;1mModel: $MODEL\033[0m\n"
+    printf "\033[34;1mVersion: Unknown\033[0m\n"
+fi
 
 printf "\033[31;1mAll actions performed here cannot be rolled back automatically.\033[0m\n"
 
