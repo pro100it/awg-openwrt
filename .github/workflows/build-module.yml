@@ -1,33 +1,34 @@
-name: Build AmneziaWG OpenWRT Packages
+name: Create Release on Tag
 
 on:
   push:
     tags:
       - "v*.*.*"
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
-        description: 'OpenWRT version (e.g., "23.05.3" or "snapshots")'
+        description: 'OpenWRT version (e.g., 24.10.3)'
         required: true
         type: string
-        default: 'snapshots'
       targets:
-        description: 'Targets (e.g., "mediatek")'
+        description: 'Targets (comma-separated, e.g., "stm32,ramips")'
         required: true
         type: string
-        default: 'mediatek'
       subtargets:
-        description: 'Subtargets (e.g., "filogic")'
+        description: 'Subtargets (comma-separated, e.g., "stm32mp1,mt7621")'
         required: true
         type: string
-        default: 'filogic'
 
 jobs:
   generate-config:
     runs-on: ubuntu-latest
     outputs:
       job-config: ${{ steps.generate-config.outputs.job-config }}
-      has-config: ${{ steps.generate-config.outputs.has-config }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,7 +38,7 @@ jobs:
         with:
           node-version: '20.16.0'
 
-      - name: Get OpenWRT version from input
+      - name: Get OpenWRT version from tag
         id: get_version
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -50,57 +51,20 @@ jobs:
           else
             echo "VERSION=${GITHUB_REF/refs\/tags\/v/}" >> $GITHUB_ENV
           fi
-          echo "Using OpenWRT version: $VERSION"
-          echo "Targets: $TARGETS"
-          echo "Subtargets: $SUBTARGETS"
 
       - name: Install dependencies
         run: npm install
 
       - name: Generate Job Config
         id: generate-config
-        run: |
-          CONFIG=$(node index.js "${{ env.VERSION }}" "${{ env.TARGETS }}" "${{ env.SUBTARGETS }}")
-          echo "job-config=$CONFIG" >> $GITHUB_OUTPUT
-          
-          # Проверяем не пустой ли конфиг
-          if [ "$CONFIG" != "[]" ] && [ -n "$CONFIG" ]; then
-            echo "has-config=true" >> $GITHUB_OUTPUT
-            echo "✅ Configuration generated successfully"
-            echo "Config: $CONFIG"
-          else
-            echo "has-config=false" >> $GITHUB_OUTPUT
-            echo "❌ No configuration generated"
-          fi
+        run: node index.js ${{ env.VERSION }} "${{ env.TARGETS }}" "${{ env.SUBTARGETS }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  debug-config:
-    name: "Debug Configuration"
+  build:
+    name: "v${{ matrix.build_env.tag }} - ${{ matrix.build_env.pkgarch}} :: ${{ matrix.build_env.target}}/${{ matrix.build_env.subtarget}} build"
     runs-on: ubuntu-latest
     needs: generate-config
-    outputs:
-      should-build: ${{ steps.check-config.outputs.should-build }}
-    steps:
-      - name: Check generated config
-        id: check-config
-        run: |
-          echo "Generated job-config:"
-          echo "${{ needs.generate-config.outputs.job-config }}"
-          
-          if [ "${{ needs.generate-config.outputs.has-config }}" == "true" ]; then
-            echo "✅ Configuration is valid, proceeding with build"
-            echo "should-build=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ No valid configuration, skipping build"
-            echo "should-build=false" >> $GITHUB_OUTPUT
-          fi
-
-  build:
-    name: "Build ${{ matrix.build_env.target }}/${{ matrix.build_env.subtarget }}"
-    runs-on: ubuntu-latest
-    needs: [generate-config, debug-config]
-    if: needs.debug-config.outputs.should-build == 'true'
     strategy:
       matrix:
         build_env: ${{ fromJson(needs.generate-config.outputs.job-config) }}
@@ -110,156 +74,127 @@ jobs:
       - name: Checkout AWG source code
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install Python dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pyelftools
-            
 
-      - name: Show build info
-        run: |
-          echo "🏗️ Building for:"
-          echo "  Version: ${{ matrix.build_env.tag }}"
-          echo "  Target: ${{ matrix.build_env.target }}"
-          echo "  Subtarget: ${{ matrix.build_env.subtarget }}"
-          echo "  Arch: ${{ matrix.build_env.pkgarch }}"
-          echo "  Vermagic: ${{ matrix.build_env.vermagic }}"
+      - name: Cache OpenWrt SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        env:
+          cache-name: "cache-sdk-${{ matrix.build_env.tag }}-${{ matrix.build_env.target}}-${{ matrix.build_env.subtarget}}"
+        with:
+          path: openwrt-sdk-*/
+          key: ${{ runner.os }}-sdk-${{ env.cache-name }}
 
       - name: Download and extract OpenWrt SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          echo "🔧 Building for: ${{ matrix.build_env.target }}/${{ matrix.build_env.subtarget }} (${{ matrix.build_env.tag }})"
-          
-          # Определяем URL в зависимости от версии
-          if [ "${{ matrix.build_env.tag }}" == "snapshots" ]; then
-            BASE_URL="https://downloads.openwrt.org/snapshots/targets"
-            SDK_PATTERN="openwrt-sdk-${{ matrix.build_env.target}}-${{ matrix.build_env.subtarget}}_gcc-[^\"]*_musl[^\"]*\.Linux-x86_64\.tar\.[xz|zst]*"
-          else
-            BASE_URL="https://downloads.openwrt.org/releases/${{ matrix.build_env.tag }}/targets"
-            SDK_PATTERN="openwrt-sdk-${{ matrix.build_env.tag }}-${{ matrix.build_env.target}}-${{ matrix.build_env.subtarget}}_gcc-[^\"]*_musl[^\"]*\.Linux-x86_64\.tar\.[xz|zst]*"
-          fi
-          
-          SDK_URL="$BASE_URL/${{ matrix.build_env.target }}/${{ matrix.build_env.subtarget }}"
-          echo "📦 SDK URL: $SDK_URL"
-          
-          # Ищем файл SDK
-          SDK_FILE=$(curl -s "$SDK_URL/" | grep -oE "$SDK_PATTERN" | head -n1)
+          echo "pkgarch: ${{ matrix.build_env.pkgarch}}, target:${{ matrix.build_env.target}}, subtarget: ${{ matrix.build_env.subtarget}}"
+
+          # Get the actual SDK filename from the directory listing
+          SDK_FILE=$(curl -s "https://downloads.openwrt.org/releases/${{ matrix.build_env.tag }}/targets/${{ matrix.build_env.target}}/${{ matrix.build_env.subtarget}}/" | grep -o "openwrt-sdk-${{ matrix.build_env.tag }}-${{ matrix.build_env.target}}-${{ matrix.build_env.subtarget}}_gcc-[^\"]*_musl[^\"]*\.Linux-x86_64\.tar\.[xz|zst]*" | head -n1)
           
           if [ -z "$SDK_FILE" ]; then
-            echo "❌ SDK file not found for ${{ matrix.build_env.target }}/${{ matrix.build_env.subtarget }}"
-            echo "Available files:"
-            curl -s "$SDK_URL/" | grep -oE 'href="[^"]*\.(tar\.zst|tar\.xz)"' || true
+            echo "SDK file not found for ${{ matrix.build_env.tag }} ${{ matrix.build_env.target}} ${{ matrix.build_env.subtarget}}"
             exit 1
           fi
           
-          echo "📥 Downloading: $SDK_FILE"
-          wget -q "$SDK_URL/$SDK_FILE"
+          SDK_DOWNLOAD_URL="https://downloads.openwrt.org/releases/${{ matrix.build_env.tag }}/targets/${{ matrix.build_env.target}}/${{ matrix.build_env.subtarget}}/${SDK_FILE}"
+          echo "Downloading SDK: $SDK_DOWNLOAD_URL"
           
-          # Распаковываем
+          wget "$SDK_DOWNLOAD_URL"
+          
+          # Extract based on file extension
           if [[ "$SDK_FILE" == *.tar.zst ]]; then
             tar --zstd -xf "$SDK_FILE"
-          else
+          elif [[ "$SDK_FILE" == *.tar.xz ]]; then
             tar -xf "$SDK_FILE"
-          fi
-          rm "$SDK_FILE"
-          echo "✅ SDK extracted successfully"
-
-      - name: Setup build environment
-        run: |
-          # Находим SDK директорию
-          SDK_DIR=$(find . -maxdepth 1 -name "openwrt-sdk-*" -type d | head -n1)
-          if [ -z "$SDK_DIR" ]; then
-            echo "❌ SDK directory not found"
+          else
+            echo "Unknown archive format: $SDK_FILE"
             exit 1
           fi
           
-          echo "📁 Using SDK: $SDK_DIR"
+          rm "$SDK_FILE"
+
+      - name: Setup SDK and feeds
+        run: |
+          # Find SDK directory
+          SDK_DIR=$(find . -maxdepth 1 -name "openwrt-sdk-*" -type d | head -n1)
+          
+          if [ -z "$SDK_DIR" ]; then
+            echo "SDK directory not found"
+            exit 1
+          fi
+          
+          # Get absolute paths
+          WORKSPACE_DIR=$(pwd)
+          
           cd "$SDK_DIR"
           
-          # Обновляем feeds
-          echo "⚙️ Setting up feeds..."
+          # Update feeds to include LuCI
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           
-          # Копируем пакеты
-          echo "📋 Copying AmneziaWG packages..."
-          cp -r ../kmod-amneziawg package/
-          cp -r ../amneziawg-tools package/
-          cp -r ../luci-proto-amneziawg package/
+          # Copy current repository packages directly to package directory
+          cp -r "$WORKSPACE_DIR/kmod-amneziawg" package/
+          cp -r "$WORKSPACE_DIR/amneziawg-tools" package/
+          cp -r "$WORKSPACE_DIR/luci-proto-amneziawg" package/
           
-          # Конфигурация
-          echo "⚙️ Configuring build..."
-          cat > .config << EOF
-          CONFIG_PACKAGE_kmod-amneziawg=m
-          CONFIG_PACKAGE_amneziawg-tools=y
-          CONFIG_PACKAGE_luci-proto-amneziawg=y
-          CONFIG_PACKAGE_luci-i18n-amneziawg-ru=y
-          EOF
+          # Configure packages to build
+          echo "CONFIG_PACKAGE_kmod-amneziawg=m" > .config
+          echo "CONFIG_PACKAGE_amneziawg-tools=y" >> .config
+          echo "CONFIG_PACKAGE_luci-proto-amneziawg=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-amneziawg-ru=y" >> .config
           
-          export FORCE=1
           make defconfig
-          echo "✅ Build environment setup complete"
 
-      - name: Build packages
+      - name: Build AmneziaWG packages
         run: |
+          # Find SDK directory
           SDK_DIR=$(find . -maxdepth 1 -name "openwrt-sdk-*" -type d | head -n1)
           cd "$SDK_DIR"
+
+          echo "Building AmneziaWG packages..."
+
+          # Build kmod-amneziawg (kernel module)
+          echo "Building kmod-amneziawg..."
+          make package/kmod-amneziawg/{download,prepare} V=s || true
+          make package/kmod-amneziawg/compile V=s || true
+
+          # Build luci-proto-amneziawg (web interface)
+          echo "Building luci-proto-amneziawg..."
+          make package/luci-proto-amneziawg/{download,prepare} V=s
+          make package/luci-proto-amneziawg/compile V=s
+
+          # Build amneziawg-tools (userspace tools)
+          echo "Building amneziawg-tools..."
+          make package/amneziawg-tools/{download,prepare} V=s
+          make package/amneziawg-tools/compile V=s
           
-          echo "🏗️ Building AmneziaWG packages..."
-          
-          for pkg in kmod-amneziawg amneziawg-tools luci-proto-amneziawg; do
-            echo "🔨 Building $pkg..."
-            
-            # Подготовка
-            make package/$pkg/{download,prepare} V=s || echo "⚠️ Preparation warnings for $pkg"
-            
-            # Компиляция
-            if make package/$pkg/compile -j$(nproc) V=s; then
-              echo "✅ $pkg built successfully"
-            else
-              echo "⚠️ $pkg build completed with warnings"
-            fi
-            echo "---"
-          done
-          
-          echo "📦 Build process completed"
+          echo "Build completed. Checking for built packages..."
+          find bin/ -name "*.ipk" | grep -E "(amneziawg|luci-proto-amneziawg|luci-i18n-amneziawg)" | head -10
 
       - name: Prepare artifacts
         run: |
+          # Find SDK directory
           SDK_DIR=$(find . -maxdepth 1 -name "openwrt-sdk-*" -type d | head -n1)
+          
           mkdir -p awgrelease
+          postfix="v${{ matrix.build_env.tag }}_${{ matrix.build_env.pkgarch}}_${{ matrix.build_env.target}}_${{ matrix.build_env.subtarget}}"
           
-          # Определяем постфикс и расширение
-          if [ "${{ matrix.build_env.tag }}" == "snapshots" ]; then
-            postfix="snapshots_${{ matrix.build_env.pkgarch}}_${{ matrix.build_env.target}}_${{ matrix.build_env.subtarget}}"
-            file_ext="apk"
-          else
-            postfix="v${{ matrix.build_env.tag }}_${{ matrix.build_env.pkgarch}}_${{ matrix.build_env.target}}_${{ matrix.build_env.subtarget}}"
-            file_ext="ipk"
-          fi
+          # Copy built packages
+          find "$SDK_DIR/bin/packages" -name "amneziawg-tools_*.ipk" -exec cp {} awgrelease/amneziawg-tools_${postfix}.ipk \; || echo "amneziawg-tools package not found"
+          find "$SDK_DIR/bin/packages" -name "luci-proto-amneziawg_*.ipk" -exec cp {} awgrelease/luci-proto-amneziawg_${postfix}.ipk \; || echo "luci-proto-amneziawg package not found"
+          find "$SDK_DIR/bin/packages" -name "luci-i18n-amneziawg-ru_*.ipk" -exec cp {} awgrelease/luci-i18n-amneziawg-ru_${postfix}.ipk \; || echo "luci-i18n-amneziawg-ru package not found"
+          find "$SDK_DIR/bin/targets" -name "kmod-amneziawg_*.ipk" -exec cp {} awgrelease/kmod-amneziawg_${postfix}.ipk \; || echo "kmod-amneziawg package not found"
           
-          echo "📦 Collecting artifacts..."
-          
-          # Ищем файлы с правильным расширением
-          find "$SDK_DIR/bin" -name "*amneziawg-tools*.$file_ext" -exec cp {} awgrelease/amneziawg-tools_${postfix}.$file_ext \; || echo "amneziawg-tools package not found"
-          find "$SDK_DIR/bin" -name "*luci-proto-amneziawg*.$file_ext" -exec cp {} awgrelease/luci-proto-amneziawg_${postfix}.$file_ext \; || echo "luci-proto-amneziawg package not found"
-          find "$SDK_DIR/bin" -name "*luci-i18n-amneziawg-ru*.$file_ext" -exec cp {} awgrelease/luci-i18n-amneziawg-ru_${postfix}.$file_ext \; || echo "luci-i18n-amneziawg-ru package not found"
-          find "$SDK_DIR/bin" -name "*kmod-amneziawg*.$file_ext" -exec cp {} awgrelease/kmod-amneziawg_${postfix}.$file_ext \; || echo "kmod-amneziawg package not found"
-          
-          echo "📊 Built packages:"
-          ls -la awgrelease/ || echo "No packages built"
+          echo "Built packages:"
+          ls -la awgrelease/
 
-      - name: Upload Snapshot Artifact
-        if: matrix.build_env.tag == 'snapshots'
-        uses: actions/upload-artifact@v4
-        with:
-          name: awg-${{ matrix.build_env.target }}-${{ matrix.build_env.subtarget }}-${{ matrix.build_env.pkgarch }}
-          path: awgrelease/*
-
-      - name: Create Release
-        if: matrix.build_env.tag != 'snapshots'
+      - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          files: awgrelease/*
+          files: awgrelease/*.ipk
           tag_name: v${{ matrix.build_env.tag }}
-          draft: false
-          prerelease: false
