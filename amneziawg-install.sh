@@ -870,7 +870,7 @@ install_awg_packages() {
     TARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 1)
     SUBTARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 2)
     VERSION=$(ubus call system board | jsonfilter -e '@.release.version')
-    PKGPOSTFIX="_v${VERSION}_${ARCH}_${TARGET}_${SUBTARGET}.apk"
+    PKGPOSTFIX="_v${VERSION}_${TARGET}_${SUBTARGET}.apk"
     BASE_URL="https://github.com/pro100it/awg-openwrt/releases/download"
 
     AWG_DIR="/tmp/amneziawg"
