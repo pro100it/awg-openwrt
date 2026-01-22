@@ -4,7 +4,7 @@ AmneziaWG — OpenWRT 25.12.0-rc1 (SNR AX2)
 https://github.com/Slava-Shchipunov/awg-openwrt
 
 Поддержка / Supported:
-OpenWRT 25.12.0-rc1 • SNR AX2 • AWG 2.0
+OpenWRT 25.12.0-rc1, 25.12.0-rc2 • SNR AX2 • AWG 2.0
 Пакеты / Packages: .apk • Менеджер / Manager: apk
 
 ❌ Другие устройства и версии OpenWRT не поддерживаются
