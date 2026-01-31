@@ -3,16 +3,15 @@ AmneziaWG — OpenWRT 25.12.0-rc1 (SNR AX2)
 ⚠️ Форк / Fork оригинального репозитория:
 https://github.com/Slava-Shchipunov/awg-openwrt
 
-Поддержка / Supported:
+Поддержка 
 OpenWRT 25.12.0-rc1, 25.12.0-rc2, 25.12.0-rc3, 25.12.0-rc3• SNR AX2 • AWG 2.0
-Пакеты / Packages: .apk • Менеджер / Manager: apk
+Пакеты  .apk • Менеджер / Manager: apk
 
-❌ Другие устройства и версии OpenWRT не поддерживаются
-❌ Other devices and OpenWRT versions are not supported
+❌ Другие устройства и версии OpenWRT не поддерживаются но попробовать на ваш страх и риск можно )
+
 
 Установка / Install:
 Скачайте пакеты из GitHub Releases
-Download packages from GitHub Releases
 
 apk add --allow-untrusted *.apk
 
@@ -21,5 +20,5 @@ apk add --allow-untrusted *.apk
 sh <(wget -O - https://raw.githubusercontent.com/pro100it/awg-openwrt/refs/heads/master/amneziawg-install.sh)
 ```
 
-Настройка вручную через LuCI / Manual LuCI configuration
+Настройка вручную через LuCI 
 (Network → Interfaces → AmneziaWG)
