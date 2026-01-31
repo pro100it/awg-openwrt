@@ -124,7 +124,7 @@ This project is provided **as is**, without any warranty.
 
 ---
 
-## ❤️ Credits
+##  Credits
 
 * Original project: **Slava‑Shchipunov**
 * Fork & automation: **pro100it**
