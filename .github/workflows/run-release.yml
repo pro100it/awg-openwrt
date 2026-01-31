@@ -1,66 +1,55 @@
 name: Sync OpenWRT Releases
 
 on:
-  # schedule:
-   # - cron: '0 0 */3 * *' # Проверка новых релизов раз в три дня
-  # workflow_dispatch: # Возможность вручную запустить Action
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 */3 * *'
+
+permissions:
+  contents: write
 
 jobs:
   sync-releases:
     runs-on: ubuntu-latest
     outputs:
       release_exists: ${{ steps.check_release.outputs.release_exists }}
-      release_tag: ${{ steps.get_release.outputs.release_tag }} 
+      release_tag: ${{ steps.get_release.outputs.release_tag }}
+
     steps:
-      - name: Checkout your repo
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Get the latest release from OpenWRT
+      - name: Get latest OpenWRT release
         id: get_release
         run: |
-          curl -s https://api.github.com/repos/openwrt/openwrt/releases/latest > latest_release.json
-          RELEASE_TAG=$(jq -r .tag_name latest_release.json)
-          RELEASE_NAME=$(jq -r .name latest_release.json)
-          echo "::set-output name=release_tag::$RELEASE_TAG"
-          echo "::set-output name=release_name::$RELEASE_NAME"
+          curl -s https://api.github.com/repos/openwrt/openwrt/releases/latest > latest.json
+          RELEASE_TAG=$(jq -r .tag_name latest.json)
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Check if release exists in your repo
+      - name: Check if release exists
         id: check_release
         run: |
-          RELEASE_EXISTS=$(curl -s https://api.github.com/repos/pro100it/awg-openwrt/releases/tags/${{ steps.get_release.outputs.release_tag }} | jq -r .tag_name)
-          if [ "$RELEASE_EXISTS" == "null" ]; then
-            echo "::set-output name=release_exists::false"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.get_release.outputs.release_tag }})
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "release_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "::set-output name=release_exists::true"
+            echo "release_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create release in your repo
+      - name: Create release
         if: steps.check_release.outputs.release_exists == 'false'
         run: |
-          ART="
-          \`\`\`
-            _______                     ________        __
-           |       |.-----.-----.-----.|  |  |  |.----.|  |_
-           |   -   ||  _  |  -__|     ||  |  |  ||   _||   _|
-           |_______||   __|_____|__|__||________||__|  |____|
-                    |__| A M N E Z I A   W I R E G U A R D
-          -----------------------------------------------------
-          OpenWrt ${{ steps.get_release.outputs.release_tag }}
-          -----------------------------------------------------
-          \`\`\`"
+          gh release create "${{ steps.get_release.outputs.release_tag }}" \
+            --title "AmneziaWG for OpenWrt ${{ steps.get_release.outputs.release_tag }}" \
+            --notes "Auto build for OpenWrt ${{ steps.get_release.outputs.release_tag }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          curl -X POST https://api.github.com/repos/pro100it/awg-openwrt/releases \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg tag "${{ steps.get_release.outputs.release_tag }}" \
-                    --arg name "Build amnezia wg for all devices with openwrt ${{ steps.get_release.outputs.release_tag }}" \
-                    --arg body "$ART" \
-                    '{ tag_name: $tag, name: $name, body: $body }')"
-  
   run-build:
-    runs-on: ubuntu-latest
     needs: sync-releases
     if: needs.sync-releases.outputs.release_exists == 'false'
-    uses: pro100it/awg-openwrt/.github/workflows/build-module.yml@master
+    uses: ./.github/workflows/build-module.yml
     with:
       tag_name: ${{ needs.sync-releases.outputs.release_tag }}
