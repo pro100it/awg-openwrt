@@ -66,9 +66,9 @@ function generateDescription(name, texts) {
 }
 
 function buildSVGQRCode(data, code) {
-	// pixel size larger than 4 clips right and bottom edges of complex configs
+	// pixel size 3 for mobile browser
 	const options = {
-		pixelSize: 4,
+		pixelSize: 3,
 		whiteColor: 'white',
 		blackColor: 'black'
 	};
@@ -934,7 +934,7 @@ return network.registerProtocol('amneziawg', {
 					}, [
 						E('div', {
 							'class': 'qr-code',
-							'style': 'width:320px;flex:0 1 320px;text-align:center'
+							'style': 'text-align:center'
 						}, [
 							E('em', { 'class': 'spinning' }, [ _('Generating QR code…') ])
 						]),
